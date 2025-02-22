@@ -7,7 +7,7 @@ import time
 import os
 from copy import deepcopy
 
-# Define a simple fully connected model for MNIST
+# simply MNIST FC
 class MNISTModel(nn.Module):
     def __init__(self):
         super(MNISTModel, self).__init__()
@@ -27,7 +27,7 @@ def count_weights(model):
     total_weights = 0
     for name, param in model.named_parameters():
         if 'weight' in name:
-            total_weights += param.numel()  # Count all weights (number of elements)
+            total_weights += param.numel()  
     return total_weights
 
 def train(model, trainloader, criterion, optimizer, epochs=5):
@@ -58,32 +58,33 @@ def count_zero_weights(model):
     zero_count = 0
     for name, param in model.named_parameters():
         if "weight" in name:
-            zero_count += (param.data == 0).sum().item()  # Count zeros in the weight tensor
+            zero_count += (param.data == 0).sum().item()  
     return zero_count
 
 def iterative_magnitude_pruning(model, trainloader, testloader, prune_rounds=10, prune_ratio=0.2, epochs=5):
     """Performs iterative magnitude pruning following the lottery ticket hypothesis."""
+   
     # Store initial weights for reset after pruning
     initial_state = deepcopy(model.state_dict())
 
-    # Initialize pruning masks (same shape as weights)
+    # create pruning masks
     pruning_masks = {}
     for name, param in model.named_parameters():
         if "weight" in name:
             pruning_masks[name] = torch.ones_like(param.data, dtype=torch.bool)  # Initially, all weights are trainable
 
-    # Train the initial network
+    # train OG network
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train(model, trainloader, criterion, optimizer, epochs)
 
-    # Evaluate accuracy before pruning
+    # eval
     initial_accuracy = evaluate(model, testloader)
     print(f"Initial accuracy: {initial_accuracy:.4f}")
 
     total_pruned_weights = 0  # Track total pruned weights
 
-    # Iterative pruning rounds
+    # IMP
     for round in range(prune_rounds):
         print(f"\nPruning round {round + 1}/{prune_rounds}")
         print(f"Num zero weights before pruning: {count_zero_weights(model)}")
@@ -96,22 +97,22 @@ def iterative_magnitude_pruning(model, trainloader, testloader, prune_rounds=10,
                 # Compute layer-specific threshold
                 threshold = torch.quantile(torch.abs(param.data.view(-1)), prune_ratio)
                 
-                # Update the pruning mask: a weight is pruned if its magnitude is below the threshold
+                # update the pruning mask: a weight is pruned if its magnitude is below the threshold
                 new_mask = torch.abs(param.data) > threshold
                 pruning_masks[name] &= new_mask  # Maintain previously pruned weights
                 
                 round_pruned_weights += (~pruning_masks[name]).sum().item()  # Count newly pruned weights
                 
-                # Zero out pruned weights
+                # zero out pruned weights
                 param.data *= pruning_masks[name]
 
-                # Only reset the unpruned weights to their initial values
+                # only reset the unpruned weights to their initial values
                 param.data[pruning_masks[name]] = initial_state[name][pruning_masks[name]]
 
         total_pruned_weights += round_pruned_weights  # Accumulate pruned weights
         print(f"Num zero weights before training: {count_zero_weights(model)}")
 
-        # Retrain the pruned model while enforcing the pruning mask
+        # retrain the pruned model while enforcing the pruning mask
         def train_with_mask(model, trainloader, criterion, optimizer, epochs, pruning_masks):
             model.train()
             for _ in range(epochs):
@@ -132,24 +133,16 @@ def iterative_magnitude_pruning(model, trainloader, testloader, prune_rounds=10,
 
         print(f"Num zero weights after training: {count_zero_weights(model)}")
 
-        # Evaluate pruned model
         pruned_accuracy = evaluate(model, testloader)
         print(f"Accuracy after pruning round {round + 1}: {pruned_accuracy:.4f}")
 
     return model, total_pruned_weights
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from copy import deepcopy
 
 def count_zero_weights(model):
-    """Counts the number of zeroed weights in the model."""
     return sum((param.data == 0).sum().item() for name, param in model.named_parameters() if "weight" in name)
 
-def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10, prune_ratio=0.2, epochs=5):
-    """Performs iterative magnitude pruning ensuring exactly prune_ratio of the original weights are pruned each round."""
-    
+def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10, prune_ratio=0.2, epochs=5):    
     # Store initial weights for reset after pruning
     initial_state = deepcopy(model.state_dict())
 
@@ -166,9 +159,9 @@ def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10
     print(f"Initial accuracy: {initial_accuracy:.4f}")
 
     total_params = sum(param.numel() for name, param in model.named_parameters() if "weight" in name)
-    total_pruned_weights = 0  # Track total pruned weights
+    total_pruned_weights = 0  # track total pruned weights
 
-    # Iterative pruning rounds
+    # iterative pruning rounds
     for round in range(prune_rounds):
         print(f"\nPruning round {round + 1}/{prune_rounds}")
         print(f"Num zero weights before pruning: {count_zero_weights(model)}")
@@ -178,15 +171,13 @@ def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10
             param.data[pruning_masks[name]].view(-1) for name, param in model.named_parameters() if "weight" in name
         ])
 
-        # Compute global threshold to prune exactly prune_ratio of the original model's weights
         num_to_prune = int(prune_ratio * total_params)  # Fixed 20% of the original model weights
-        if num_to_prune > len(all_unpruned_weights):  # Avoid over-pruning
+        if num_to_prune > len(all_unpruned_weights):  # to stop from over-pruning
             num_to_prune = len(all_unpruned_weights)
 
         if num_to_prune > 0:
             threshold = torch.topk(torch.abs(all_unpruned_weights), num_to_prune, largest=False).values[-1]  # Get global threshold
 
-            # Apply pruning based on global threshold
             round_pruned_weights = 0
             for name, param in model.named_parameters():
                 if "weight" in name:
@@ -196,16 +187,14 @@ def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10
                     
                     round_pruned_weights += (~pruning_masks[name]).sum().item()  # Count newly pruned weights
 
-                    # Zero out pruned weights
                     param.data *= pruning_masks[name]
 
-                    # Restore only the unpruned weights to their original values
+                    # restore only  unpruned weights to their OG values
                     param.data[pruning_masks[name]] = initial_state[name][pruning_masks[name]]
 
             total_pruned_weights += round_pruned_weights
             print(f"Num zero weights before training: {count_zero_weights(model)}")
 
-        # Retrain the pruned model while enforcing the pruning mask
         def train_with_mask(model, trainloader, criterion, optimizer, epochs, pruning_masks):
             model.train()
             for _ in range(epochs):
@@ -216,7 +205,7 @@ def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10
                     loss.backward()
                     optimizer.step()
 
-                    # Reapply pruning masks to ensure pruned weights remain zero
+                    # reapply pruning masks to ensure pruned weights remain zero
                     with torch.no_grad():
                         for name, param in model.named_parameters():
                             if name in pruning_masks:
@@ -226,7 +215,6 @@ def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10
 
         print(f"Num zero weights after training: {count_zero_weights(model)}")
 
-        # Evaluate pruned model
         pruned_accuracy = evaluate(model, testloader)
         print(f"Accuracy after pruning round {round + 1}: {pruned_accuracy:.4f}")
 
@@ -235,8 +223,7 @@ def iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=10
 
 
 
-
-# Load MNIST dataset
+#load Mnist
 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
 trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
@@ -244,7 +231,7 @@ trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
 testset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=1000, shuffle=False)
 
-# Check if a pre-trained model exists
+# check if a pre-trained model exists
 model_path = "mnist_model.pth"
 model = MNISTModel()
 criterion = nn.CrossEntropyLoss()
@@ -259,7 +246,7 @@ else:
     start_time = time.time()
     train(model, trainloader, criterion, optimizer, epochs=10)
     train_time = time.time() - start_time
-    torch.save(model.state_dict(), model_path)  # Save the model
+    torch.save(model.state_dict(), model_path)  
     print(f"\nModel saved as {model_path}")
     print(f"Training Time: {train_time:.2f} seconds")
 
@@ -267,13 +254,12 @@ else:
 originalAmountWeights = count_weights(model)
 print(originalAmountWeights)
 
-#Run iterative pruning
+#Run IMP
 pruned_model, weightsPruned = iterative_magnitude_pruning2(model, trainloader, testloader, prune_rounds=3, prune_ratio=0.2, epochs=5)
 print(f"\nPercent of model pruned: {weightsPruned/originalAmountWeights * 100}%")
 
-torch.save(model.state_dict(), "pruned_model.pth")  # Save the model
+torch.save(model.state_dict(), "pruned_model.pth")  #saving model
 print(f"\nModel saved as pruned_model.pth")
 
-# Example usage:
 zeroed_weights = count_zero_weights(pruned_model)
 print(f"Number of zeroed weights: {zeroed_weights}")
